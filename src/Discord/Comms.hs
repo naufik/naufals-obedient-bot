@@ -44,9 +44,13 @@ type DiscordUserID = T.Text
 type DiscordGuildID = T.Text
 
 -- TODO: Create payload types.
-data GatewaySignal = GatewaySignal Int Value
-data DiscordMessage = DiscordMessage T.Text (Maybe DiscordAttachment) deriving Show
-data DiscordAttachment = DiscordAttachment T.Text T.Text deriving Show
+data GatewaySignal = GatewaySignal Int (Maybe Integer) Value deriving Show
+
+instance FromJSON GatewaySignal where
+  parseJSON = withObject "GatewaySignal" $
+    \v -> GatewaySignal <$> (v .: "op") <*> (v .:? "s") <*> (pure $ Object v)
+  
+data DiscordMessage = DiscordMessage T.Text (Maybe DiscordAttachment) 
 
 instance ToJSON DiscordMessage where
   toJSON (DiscordMessage m a) = case a of 
@@ -57,15 +61,13 @@ instance ToJSON DiscordMessage where
 instance FromJSON DiscordMessage where
   parseJSON = withObject "DiscordMessage" $
     \v -> DiscordMessage <$> (v .: "content") <*> (v .:? "$$$$")
+  
+data DiscordAttachment = DiscordAttachment T.Text T.Text deriving Show
 
 -- BROKEN, DO NOT USE.
 instance FromJSON DiscordAttachment where
   parseJSON = withObject "DiscordAttachment" $
     \v -> DiscordAttachment <$> (v .: "mime") <*> (v .: "url")
-
-instance FromJSON GatewaySignal where
-  parseJSON = withObject "GatewaySignal" $
-    \v -> GatewaySignal <$> (v .: "op") <*> (v .: "d")
 
 -- Constants and global helpers
 withDefault :: (DiscordConfig -> IO a) -> IO a
@@ -81,38 +83,37 @@ libData = object [ "$os" .= ("linux" :: T.Text),
 
 -- Functions that deal with gateway.
 -- TODO: change B.ByteString -> IO () to DiscordMessage -> IO ()
-createGatewayListener :: DiscordConfig -> [(B.ByteString -> Bool, B.ByteString -> IO ())] -> ClientApp ()
-createGatewayListener config intents conn =
-  -- TODO: un-hardcode this, make it an actual event->response system
-  -- First incoming event is always Hello
-  getGatewayData conn
-  >>= return . (\x -> fromMaybe (GatewaySignal 0 $ object []) (decodeStrict x :: Maybe GatewaySignal))
-  >>= (\x -> newMVar 0 >>= pure . ((,) x))
-  >>= (\(GatewaySignal i v, seqVar) ->
+createGatewayListener :: DiscordConfig -> (DiscordConfig -> GatewaySignal -> ClientApp ()) -> ClientApp ()
+createGatewayListener config processEvent conn =
+  gatewayHello
+  >>= (\(GatewaySignal i _ v, seqVar) ->
     (createHeartbeater 20000000 seqVar conn)
     >> sendGatewayIdentify config conn 
     -- start operation as usual.
-    >> forever (getGatewayData conn
-      >>= pure . (\x -> (decodeStrict x :: Maybe GatewaySignal) >>= (parseMaybe parseJSON . getSignalPayload :: GatewaySignal -> Maybe DiscordMessage))
-      >>= (\x -> putStrLn (show x) >> pure x)
-      >>= (\x -> case x of  Nothing -> pure ()
-                            Just message -> processMessage config message)
-      >> takeMVar seqVar
-      >>= putMVar seqVar . (+1)))
+    >> forever (receiveRoutine seqVar))
+  where
+    gatewayHello :: IO (GatewaySignal, MVar Integer)
+    gatewayHello = getGatewayData conn
+      >>= (return . fromMaybe (GatewaySignal 0 Nothing $ object []) . decodeStrict)
+      >>= (\x -> newMVar 0 >>= pure . ((,) x))
 
--- TODO: temporary function remove later
-processMessage :: DiscordConfig -> DiscordMessage -> IO ()
-processMessage config (DiscordMessage t _)
-  | t == "ping" = getEnv "BOT_TESTING_CHANNEL" >>= (\x -> runReq defaultHttpConfig $ sendSimpleMessage config (T.pack x) "pong" >> pure ())
-  | otherwise   = mempty
+    receiveRoutine :: MVar Integer -> IO ()
+    receiveRoutine seqVar = void $ getGatewayData conn
+      >>= pure . (\x -> (decodeStrict x :: Maybe GatewaySignal))
+      >>= processMessage seqVar
+
+    processMessage :: MVar Integer -> Maybe GatewaySignal -> IO ()
+    processMessage seqVar (Just (GatewaySignal op seq pl)) =
+      processEvent config (GatewaySignal op seq pl) conn
+      >> case seq of  Just i -> (swapMVar seqVar i >> pure ())
+                      Nothing  -> pure ()
 
 createHeartbeater :: Int -> MVar Integer -> Connection -> IO ()
-createHeartbeater interval seqVar conn = sendGatewayHeartbeat Nothing conn
-    >> (forkIO . forever) (
-      readMVar seqVar >>=
-      (\x -> sendGatewayHeartbeat (Just x) conn)
-      >> threadDelay interval) 
-  >> pure ()
+createHeartbeater interval seqVar conn = void $ sendGatewayHeartbeat Nothing conn
+  >> (forkIO . forever) (
+    readMVar seqVar >>=
+    (\x -> sendGatewayHeartbeat (Just x) conn)
+    >> threadDelay interval) 
 
 -- Individual Send Functions
 sendGatewayIdentify :: DiscordConfig -> Connection -> IO ()
@@ -138,7 +139,7 @@ sendGatewayData conn obj = sendTextData conn $ encode obj
 
 -- Signal Processing
 getSignalPayload :: GatewaySignal -> Value
-getSignalPayload (GatewaySignal i v) = v
+getSignalPayload (GatewaySignal _ _ v) = v
 
 -- Interacting with HTTP endpoints.
 getBotGateway :: (MonadHttp m) => DiscordConfig -> m (JsonResponse Object)

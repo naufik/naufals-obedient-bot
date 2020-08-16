@@ -1,6 +1,5 @@
 module Main where
 
-import Lib
 import Discord.Comms
 import Discord.Config
 
@@ -13,4 +12,5 @@ main :: IO ()
 main = withDefault runApp
 
 runApp :: DiscordConfig -> IO ()
-runApp x = runSecureClient "gateway.discord.gg" 443 "/" $ createGatewayListener x []
+runApp x = runSecureClient "gateway.discord.gg" 443 "/"
+    $ createGatewayListener x (\config event conn -> putStrLn . show $ event)

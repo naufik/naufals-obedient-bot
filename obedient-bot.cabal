@@ -29,7 +29,6 @@ library
       Bot.Intent
       Discord.Comms
       Discord.Config
-      Lib
   other-modules:
       Paths_obedient_bot
   hs-source-dirs:
