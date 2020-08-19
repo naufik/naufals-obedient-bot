@@ -28,6 +28,7 @@ dependencies:
 - utf8-string
 - websockets >= 0.12 && < 0.13
 - wuss >= 1.1 && < 2
+- unordered-containers >= 0.2 && < 0.3
 
 
 library:

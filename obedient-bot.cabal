@@ -39,6 +39,7 @@ library
     , bytestring >=0.10 && <1
     , req >=3.5 && <4
     , text >=1.2 && <1.3
+    , unordered-containers >=0.2 && <0.3
     , utf8-string
     , websockets >=0.12 && <0.13
     , wuss >=1.1 && <2
@@ -58,6 +59,7 @@ executable obedient-bot-exe
     , obedient-bot
     , req >=3.5 && <4
     , text >=1.2 && <1.3
+    , unordered-containers >=0.2 && <0.3
     , utf8-string
     , websockets >=0.12 && <0.13
     , wuss >=1.1 && <2
@@ -78,6 +80,7 @@ test-suite obedient-bot-test
     , obedient-bot
     , req >=3.5 && <4
     , text >=1.2 && <1.3
+    , unordered-containers >=0.2 && <0.3
     , utf8-string
     , websockets >=0.12 && <0.13
     , wuss >=1.1 && <2
