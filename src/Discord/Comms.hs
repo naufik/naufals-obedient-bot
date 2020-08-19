@@ -2,19 +2,21 @@
 {-# LANGUAGE DataKinds #-}
 
 module Discord.Comms (
+  DiscordEvent(..),
   DiscordMessage(..),
-  DiscordAttachment(..),
+  GatewaySignal(..),
+  DiscordUser(..),
 
+  signalToEvent,
+  
   -- General Functions
   withDefault,
 
   -- API Functions
-  sendMessage,
   sendSimpleMessage,
   
   -- Gateway Functions
   createGatewayListener,
-  sendGatewayHeartbeat,
   getGatewayData,
   sendGatewayRaw,
   getBotGateway
@@ -49,37 +51,69 @@ data GatewaySignal = GatewaySignal Int (Maybe Integer) Value deriving Show
 instance FromJSON GatewaySignal where
   parseJSON = withObject "GatewaySignal" $
     \v -> GatewaySignal <$> (v .: "op") <*> (v .:? "s") <*> (pure $ Object v)
-  
-data DiscordMessage = DiscordMessage T.Text (Maybe DiscordAttachment) 
-
-instance ToJSON DiscordMessage where
-  toJSON (DiscordMessage m a) = case a of 
-    Just (DiscordAttachment mime url) -> (object ([ "content" .= m ,
-                                          mime .= object [ "url" .= url ] ]))
-    Nothing                           -> (object [ "content" .= m ])
-
-instance FromJSON DiscordMessage where
-  parseJSON = withObject "DiscordMessage" $
-    \v -> DiscordMessage <$> (v .: "content") <*> (v .:? "$$$$")
-  
-data DiscordAttachment = DiscordAttachment T.Text T.Text deriving Show
-
--- BROKEN, DO NOT USE.
-instance FromJSON DiscordAttachment where
-  parseJSON = withObject "DiscordAttachment" $
-    \v -> DiscordAttachment <$> (v .: "mime") <*> (v .: "url")
 
 -- Constants and global helpers
 withDefault :: (DiscordConfig -> IO a) -> IO a
 withDefault func = loadDiscordConfig >>= func
 
-apiBaseUrl :: Url Https
-apiBaseUrl = https "discord.com" /: "api" /: "v6"
+discordApiBaseUrl :: Url Https
+discordApiBaseUrl = https "discord.com" /: "api" /: "v6"
 
 libData :: Value
 libData = object [ "$os" .= ("linux" :: T.Text),
   "$browser" .= ("monads" :: T.Text),
   "$device" .= ("monads" :: T.Text) ]
+
+-- GatewaySignalTransformers
+data DiscordEvent = 
+  MessageCreate DiscordChannelID DiscordUser DiscordMessage | Unknown
+  deriving (Show)
+
+data DiscordUser = DiscordUser {
+  userId            :: T.Text,
+  username          :: T.Text,
+  userNickname      :: Maybe T.Text,
+  isBot             :: Bool,
+  userDiscriminator :: T.Text
+} deriving Show
+
+instance FromJSON DiscordUser where
+  parseJSON = withObject "DiscordUser" $ \v ->
+    do {
+      id <- (v .: "id")
+    ; un <- (v .: "username")
+    ; nickname <- (pure Nothing)
+    ; bot <- (v .:? "bot")
+    ; disc <- (v .: "discriminator")
+    ; pure $ DiscordUser {
+      userId = id,
+      username = un,
+      userNickname = nickname,
+      isBot = case bot of
+        Just x  -> x
+        Nothing -> False,
+      userDiscriminator = disc
+    }}
+
+data DiscordMessage = DiscordMessage {
+  messageId       :: T.Text,
+  messageContent  :: T.Text
+} deriving (Show)
+
+instance FromJSON DiscordMessage where
+  parseJSON = withObject "DiscordMessage" $ \v -> 
+    DiscordMessage <$> (v .: "id") <*> (v .: "content")
+
+signalToEvent :: GatewaySignal -> Maybe DiscordEvent
+signalToEvent (GatewaySignal 0 _ pl) = case getEventType pl of
+  Just "MESSAGE_CREATE" -> parseMaybe (withObject "Payload" $ (\v -> MessageCreate <$> (v .: "d" >>= (.: "channel_id")) <*> (v .: "d" >>= (.: "author")) <*> (v .: "d"))) pl
+  Just x -> Nothing
+  Nothing -> Nothing
+  where
+    getEventType :: Value -> Maybe T.Text
+    getEventType pl = join $ parseMaybe (withObject "Payload" $ \v -> (v .:? "t")) pl
+
+signalToEvent (GatewaySignal _ _ _) = Nothing
 
 -- Functions that deal with gateway.
 -- TODO: change B.ByteString -> IO () to DiscordMessage -> IO ()
@@ -144,21 +178,14 @@ getSignalPayload (GatewaySignal _ _ v) = v
 -- Interacting with HTTP endpoints.
 getBotGateway :: (MonadHttp m) => DiscordConfig -> m (JsonResponse Object)
 getBotGateway dconf = req GET
-  (apiBaseUrl /: "gateway" /: "bot")
+  (discordApiBaseUrl /: "gateway" /: "bot")
   NoReqBody
   jsonResponse
   (header "Authorization" $ "Bot " <> botAccessToken dconf)
 
 sendSimpleMessage :: (MonadHttp m) => DiscordConfig -> DiscordChannelID -> T.Text -> m LbsResponse
 sendSimpleMessage dconf channel content = req POST
-  (apiBaseUrl /: "channels" /: channel /: "messages")
+  (discordApiBaseUrl /: "channels" /: channel /: "messages")
   (ReqBodyJson . object $ ["content" .= content])
-  lbsResponse
-  (header "Authorization" $ "Bot " <> botAccessToken dconf)
-
-sendMessage :: (MonadHttp m) => DiscordConfig -> DiscordChannelID -> DiscordMessage -> m LbsResponse
-sendMessage dconf channel content = req POST
-  (apiBaseUrl /: "channels" /: channel /: "messages")
-  (ReqBodyJson content)
   lbsResponse
   (header "Authorization" $ "Bot " <> botAccessToken dconf)
