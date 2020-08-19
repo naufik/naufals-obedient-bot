@@ -62,12 +62,12 @@ getMessageKeyword _ = Nothing
 
 intentProcessPrefix :: T.Text -> (IntentResolver') -> (IntentResolver) -> IntentResolver
 intentProcessPrefix prefix catch loose sig = case signalToEvent sig >>= matchMessage of
-  Just True -> signalToEvent sig >>= processSignal >>= (catch)
+  Just True -> signalToEvent sig >>= processSignal >>= catch
   _ -> loose sig
   where
     -- TODO: can be removed if you have some willingness to
     matchMessage :: DiscordEvent -> Maybe Bool
-    matchMessage (MessageCreate _ _ z) = Just $ T.isPrefixOf prefix $ (T.strip . messageContent) z
+    matchMessage (MessageCreate _ u z) = Just $ and [(not . isBot) u, T.isPrefixOf prefix $ (T.strip . messageContent) z]
     matchMessage _ = Nothing
 
     processSignal :: DiscordEvent -> Maybe DiscordEvent
