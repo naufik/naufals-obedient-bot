@@ -22,8 +22,6 @@ module Discord.Comms (
   getBotGateway
 ) where
 
--- TODO: Delete System.Environment.
-import System.Environment
 import Control.Concurrent.MVar
 import Control.Concurrent
 import Control.Monad
@@ -41,16 +39,11 @@ import Data.Aeson.Types
 
 import Discord.Config
 
+-- TODO: Clean this UP.
 type DiscordChannelID = T.Text
 type DiscordUserID = T.Text
 type DiscordGuildID = T.Text
-
--- TODO: Create payload types.
-data GatewaySignal = GatewaySignal Int (Maybe Integer) Value deriving Show
-
-instance FromJSON GatewaySignal where
-  parseJSON = withObject "GatewaySignal" $
-    \v -> GatewaySignal <$> (v .: "op") <*> (v .:? "s") <*> (pure $ Object v)
+type DiscordMessageID = T.Text
 
 -- Constants and global helpers
 withDefault :: (DiscordConfig -> IO a) -> IO a
@@ -64,9 +57,18 @@ libData = object [ "$os" .= ("linux" :: T.Text),
   "$browser" .= ("monads" :: T.Text),
   "$device" .= ("monads" :: T.Text) ]
 
+-- Payloads and Events.
+data GatewaySignal = GatewaySignal Int (Maybe Integer) Value deriving Show
+
+instance FromJSON GatewaySignal where
+  parseJSON = withObject "GatewaySignal" $
+    \v -> GatewaySignal <$> (v .: "op") <*> (v .:? "s") <*> (pure $ Object v)
+
 -- GatewaySignalTransformers
 data DiscordEvent = 
-  MessageCreate DiscordChannelID DiscordUser DiscordMessage | Unknown
+  MessageCreate DiscordChannelID DiscordUser DiscordMessage |
+  MessageReactionAdd DiscordChannelID DiscordUser DiscordMessageID |
+  MessageReactionRemove DiscordChannelID DiscordUserID DiscordMessageID
   deriving (Show)
 
 data DiscordUser = DiscordUser {
@@ -78,22 +80,27 @@ data DiscordUser = DiscordUser {
 } deriving Show
 
 instance FromJSON DiscordUser where
-  parseJSON = withObject "DiscordUser" $ \v ->
-    do {
-      id <- (v .: "id")
-    ; un <- (v .: "username")
-    ; nickname <- (pure Nothing)
-    ; bot <- (v .:? "bot")
-    ; disc <- (v .: "discriminator")
-    ; pure $ DiscordUser {
-      userId = id,
-      username = un,
-      userNickname = nickname,
-      isBot = case bot of
-        Just x  -> x
-        Nothing -> False,
-      userDiscriminator = disc
-    }}
+  parseJSON = (withObject "DiscordUser" $ \v -> do {
+      nickname  <- (v .: "nick")
+    ; _user     <- (v .: "user") >>= parseFullUser
+    ; pure $ _user { userNickname = nickname }
+    }) <> (withObject "DiscordUser" parseFullUser)
+    where
+      parseFullUser :: Object -> Parser DiscordUser
+      parseFullUser v = do {
+          id <- (v .: "id")
+        ; un <- (v .: "username")
+        ; bot <- (v .:? "bot")
+        ; disc <- (v .: "discriminator")
+        ; pure $ DiscordUser {
+          userId = id,
+          username = un,
+          userNickname = Nothing,
+          isBot = case bot of
+            Just x  -> x
+            Nothing -> False,
+          userDiscriminator = disc
+        }}
 
 data DiscordMessage = DiscordMessage {
   messageId       :: T.Text,
@@ -104,16 +111,22 @@ instance FromJSON DiscordMessage where
   parseJSON = withObject "DiscordMessage" $ \v -> 
     DiscordMessage <$> (v .: "id") <*> (v .: "content")
 
+channel_ :: Object -> Parser DiscordChannelID
+channel_ v = (v .: "d") >>= (.: "channel_id")
+
 signalToEvent :: GatewaySignal -> Maybe DiscordEvent
-signalToEvent (GatewaySignal 0 _ pl) = case getEventType pl of
-  Just "MESSAGE_CREATE" -> parseMaybe (withObject "Payload" $ (\v -> MessageCreate <$> (v .: "d" >>= (.: "channel_id")) <*> (v .: "d" >>= (.: "author")) <*> (v .: "d"))) pl
-  Just x -> Nothing
-  Nothing -> Nothing
+signalToEvent (GatewaySignal 0 _ pl) = getEventType pl >>= (flip payloadToEvent) pl
   where
     getEventType :: Value -> Maybe T.Text
     getEventType pl = join $ parseMaybe (withObject "Payload" $ \v -> (v .:? "t")) pl
 
 signalToEvent (GatewaySignal _ _ _) = Nothing
+
+payloadToEvent :: T.Text -> Value -> Maybe DiscordEvent
+payloadToEvent "MESSAGE_CREATE" = parseMaybe (withObject "Payload" $ \v ->
+  MessageCreate <$> channel_ v <*> (v .: "member" <> v .: "user") <*> (v .: "d"))
+
+payloadToEvent _ = \t -> Nothing
 
 -- Functions that deal with gateway.
 -- TODO: change B.ByteString -> IO () to DiscordMessage -> IO ()
