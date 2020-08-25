@@ -26,7 +26,8 @@ prefixed = intentProcessPrefix ">>" allIntents (\_ -> mempty)
 echoIntent :: IntentResolver'
 echoIntent = intent $ asSignalHandler f
     where
-        f conf e@(MessageCreate c _ m) conn = void $ runReq defaultHttpConfig $ sendSimpleMessage conf c (messageContent m)
+        f conf e@(MessageCreate c _ m) conn = let mMod = T.intercalate " " (Prelude.drop 2 $ T.words $ messageContent m) in
+            void $ runReq defaultHttpConfig $ sendSimpleMessage conf c mMod
 
 aboutIntent :: IntentResolver'
 aboutIntent = intent $ asSignalHandler f
