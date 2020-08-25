@@ -67,8 +67,8 @@ instance FromJSON GatewaySignal where
 -- GatewaySignalTransformers
 data DiscordEvent = 
   MessageCreate DiscordChannelID DiscordUser DiscordMessage |
-  MessageReactionAdd DiscordChannelID DiscordUser DiscordMessageID |
-  MessageReactionRemove DiscordChannelID DiscordUserID DiscordMessageID
+  MessageReactionAdd DiscordChannelID DiscordUser DiscordMessageID DiscordEmoji |
+  MessageReactionRemove DiscordChannelID DiscordUserID DiscordMessageID DiscordEmoji
   deriving (Show)
 
 data DiscordUser = DiscordUser {
@@ -111,6 +111,29 @@ instance FromJSON DiscordMessage where
   parseJSON = withObject "DiscordMessage" $ \v -> 
     DiscordMessage <$> (v .: "id") <*> (v .: "content")
 
+data DiscordEmoji = DiscordEmoji {
+  emojiId         :: Maybe T.Text,
+  emojiName       :: Maybe T.Text,
+  animated        :: Bool
+}
+
+instance FromJSON DiscordEmoji where
+  parseJSON = withObject "DiscordEmoji" $ \v ->
+    DiscordEmoji <$> (v .: "id" >>= pure . unNull) 
+      <*> (v .: "name" >>= pure . unNull)
+      <*> (v .:? "animated" >>= \x -> pure $ case x of
+        Nothing -> False
+        Just x -> x)
+    where
+      unNull :: Value -> Maybe T.Text
+      unNull (String x) = Just x
+      unNull _ = Nothing
+
+instance Show DiscordEmoji where
+  show emoji = case emojiName emoji of
+    Just x  -> T.unpack $ ":" <> x <> ":"
+    Nothing -> "null"
+
 channel_ :: Object -> Parser DiscordChannelID
 channel_ v = (v .: "d") >>= (.: "channel_id")
 
@@ -124,8 +147,11 @@ signalToEvent (GatewaySignal _ _ _) = Nothing
 
 payloadToEvent :: T.Text -> Value -> Maybe DiscordEvent
 payloadToEvent "MESSAGE_CREATE" = parseMaybe (withObject "Payload" $ \v ->
-  MessageCreate <$> channel_ v <*> (v .: "member" <> v .: "user") <*> (v .: "d"))
-
+  MessageCreate <$> channel_ v <*> ((v .:"d") >>= \v -> (v .: "member" <> v .: "user")) <*> (v .: "d"))
+payloadToEvent "MESSAGE_REACTION_ADD" = parseMaybe (withObject "Payload" $ \v ->
+  MessageReactionAdd <$> channel_ v <*> ((v .: "d") >>= (.: "member")) <*> ((v .: "d") >>= (.: "message_id")) <*> ((v .: "d") >>= (.: "emoji")))
+payloadToEvent "MESSAGE_REACTION_REMOVE" = parseMaybe (withObject "Payload" $ \v ->
+  MessageReactionRemove <$> channel_ v <*> ((v .: "d") >>= (.: "user_id")) <*> ((v .: "d") >>= (.: "message_id")) <*> ((v .: "d") >>= (.: "emoji")))
 payloadToEvent _ = \t -> Nothing
 
 -- Functions that deal with gateway.
