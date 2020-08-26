@@ -8,7 +8,7 @@ module Discord.Comms (
   DiscordUser(..),
 
   signalToEvent,
-  
+  getEventType,
   -- General Functions
   withDefault,
 
@@ -31,7 +31,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as B8
 import qualified Data.Text as T
 import Data.Text.Encoding
-
+import Data.HashMap.Lazy
 import Network.WebSockets
 import Network.HTTP.Req
 import Data.Aeson
@@ -139,20 +139,24 @@ channel_ v = (v .: "d") >>= (.: "channel_id")
 
 signalToEvent :: GatewaySignal -> Maybe DiscordEvent
 signalToEvent (GatewaySignal 0 _ pl) = getEventType pl >>= (flip payloadToEvent) pl
-  where
-    getEventType :: Value -> Maybe T.Text
-    getEventType pl = join $ parseMaybe (withObject "Payload" $ \v -> (v .:? "t")) pl
-
 signalToEvent (GatewaySignal _ _ _) = Nothing
+
+getEventType :: Value -> Maybe T.Text
+getEventType pl = join $ parseMaybe (withObject "Payload" $ \v -> (v .:? "t")) pl
 
 payloadToEvent :: T.Text -> Value -> Maybe DiscordEvent
 payloadToEvent "MESSAGE_CREATE" = parseMaybe (withObject "Payload" $ \v ->
-  MessageCreate <$> channel_ v <*> ((v .:"d") >>= \v -> (v .: "member" <> v .: "user")) <*> (v .: "d"))
+  MessageCreate <$> channel_ v <*> ((v .: "d") >>= parseJSON . fullUser) <*> (v .: "d"))
 payloadToEvent "MESSAGE_REACTION_ADD" = parseMaybe (withObject "Payload" $ \v ->
   MessageReactionAdd <$> channel_ v <*> ((v .: "d") >>= (.: "member")) <*> ((v .: "d") >>= (.: "message_id")) <*> ((v .: "d") >>= (.: "emoji")))
 payloadToEvent "MESSAGE_REACTION_REMOVE" = parseMaybe (withObject "Payload" $ \v ->
   MessageReactionRemove <$> channel_ v <*> ((v .: "d") >>= (.: "user_id")) <*> ((v .: "d") >>= (.: "message_id")) <*> ((v .: "d") >>= (.: "emoji")))
 payloadToEvent _ = \t -> Nothing
+
+fullUser :: HashMap T.Text Value -> Value
+fullUser v = case (v ! "member") of
+  Object m -> Object $ m <> fromList [("user", (v ! "author"))]
+  _ -> object []
 
 -- Functions that deal with gateway.
 -- TODO: change B.ByteString -> IO () to DiscordMessage -> IO ()
