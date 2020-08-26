@@ -5,17 +5,12 @@ module Bot.Intent (
 
   BotOp(..),
   IntentResolver,
-  IntentResolver',
 
   -- Intent Resolver Builders
   intent,
   intentSequential,
-  intentKeywords,
   intentProcessPrefix,
-  intentKeywords',
-
-  -- Function Transformers
-  asSignalHandler
+  intentKeywords
 ) where
 
 import Discord.Config
@@ -30,44 +25,43 @@ import Data.Maybe (listToMaybe)
 import Data.Aeson
 import Data.Aeson.Types
 import Data.HashMap.Lazy
+import Data.Maybe
 
-type BotOp           = DiscordConfig -> GatewaySignal -> ClientApp ()
-type IntentResolver  = GatewaySignal -> Maybe BotOp
-type IntentResolver' = DiscordEvent -> Maybe BotOp
+type RootBotOp       = DiscordConfig -> GatewaySignal -> ClientApp ()
+type BotOp           = DiscordConfig -> DiscordEvent -> ClientApp ()
+type IntentResolver  = DiscordEvent -> Maybe BotOp
 
-createListenerFromIntents :: IntentResolver -> BotOp
-createListenerFromIntents getIntent conf sig = 
-  case getIntent sig of
-    Just botOp  -> void . forkIO . botOp conf sig
-    Nothing     -> mempty
+createListenerFromIntents :: IntentResolver -> RootBotOp
+createListenerFromIntents getIntent conf sig = fromMaybe mempty $ do {
+    ev    <- signalToEvent sig
+  ; botOp <- getIntent ev
+  ; pure $ botOp conf ev
+  }
 
-intent :: BotOp -> (a -> Maybe BotOp)
+intent :: BotOp -> (DiscordEvent -> Maybe BotOp)
 intent op _ = Just $ op
 
-intentSequential :: [(GatewaySignal -> Bool, IntentResolver)] -> IntentResolver
+intentSequential :: [(DiscordEvent -> Bool, IntentResolver)] -> IntentResolver
 intentSequential [] _ = Nothing
 intentSequential ((test, op):intents) msg
   | test msg = op msg
   | otherwise = intentSequential intents msg
 
-intentKeywords :: HashMap T.Text IntentResolver' -> IntentResolver
-intentKeywords intentMap sig = signalToEvent sig >>= (\x -> getMessageKeyword x >>= (intentMap !?) >>= (flip ($)) x)
-
-intentKeywords' :: HashMap T.Text IntentResolver' -> IntentResolver'
-intentKeywords' intentMap e = getMessageKeyword e >>= (intentMap !?) >>= (flip ($)) e
+intentKeywords :: HashMap T.Text IntentResolver -> IntentResolver
+intentKeywords intentMap e = getMessageKeyword e >>= (intentMap !?) >>= (flip ($)) e
 
 getMessageKeyword :: DiscordEvent -> Maybe T.Text
 getMessageKeyword (MessageCreate _ _ z) = (pure . T.words . messageContent) z >>= listToMaybe
 getMessageKeyword _ = Nothing
 
-intentProcessPrefix :: T.Text -> (IntentResolver') -> (IntentResolver) -> IntentResolver
-intentProcessPrefix prefix catch loose sig = case signalToEvent sig >>= matchMessage of
-  Just True -> signalToEvent sig >>= processSignal >>= catch
-  _ -> loose sig
+intentProcessPrefix :: T.Text -> IntentResolver -> (IntentResolver) -> IntentResolver
+intentProcessPrefix prefix catch loose ev = case matchMessage ev of
+  Just True -> processSignal ev >>= catch >>= pure . unprefixedCatch
+  _ -> loose ev
   where
     -- TODO: can be removed if you have some willingness to
     matchMessage :: DiscordEvent -> Maybe Bool
-    matchMessage (MessageCreate _ u z) = Just $ and [(not . isBot) u, T.isPrefixOf prefix $ (T.strip . messageContent) z]
+    matchMessage (MessageCreate _ u z) = Just $ and [(not . isBot) u, T.isPrefixOf prefix $ (messageContent) z]
     matchMessage _ = Nothing
 
     processSignal :: DiscordEvent -> Maybe DiscordEvent
@@ -77,7 +71,7 @@ intentProcessPrefix prefix catch loose sig = case signalToEvent sig >>= matchMes
       >>= \newText -> Just (MessageCreate x y z{ messageContent = newText })
     processSignal _ = Nothing
 
-asSignalHandler :: (DiscordConfig -> DiscordEvent -> ClientApp()) -> BotOp
-asSignalHandler (f) conf sig conn = case signalToEvent sig of
-  Nothing     -> mempty
-  Just event  -> f conf event conn
+    unprefixedCatch :: BotOp -> BotOp
+    unprefixedCatch catch conf ev conn  = case processSignal ev of
+      Just x  -> catch conf x conn
+      Nothing -> catch conf ev conn
