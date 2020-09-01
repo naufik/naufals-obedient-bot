@@ -219,16 +219,23 @@ getSignalPayload :: GatewaySignal -> Value
 getSignalPayload (GatewaySignal _ _ v) = v
 
 -- Interacting with HTTP endpoints.
-getBotGateway :: (MonadHttp m) => DiscordConfig -> m (JsonResponse Object)
+getBotGateway :: (MonadHttp m) => DiscordConfig -> m (JsonResponse Value)
 getBotGateway dconf = req GET
   (discordApiBaseUrl /: "gateway" /: "bot")
   NoReqBody
   jsonResponse
   (header "Authorization" $ "Bot " <> botAccessToken dconf)
 
-sendSimpleMessage :: (MonadHttp m) => DiscordConfig -> DiscordChannelID -> T.Text -> m LbsResponse
+sendSimpleMessage :: (MonadHttp m) => DiscordConfig -> DiscordChannelID -> T.Text -> m (JsonResponse Value)
 sendSimpleMessage dconf channel content = req POST
   (discordApiBaseUrl /: "channels" /: channel /: "messages")
   (ReqBodyJson . object $ ["content" .= content])
-  lbsResponse
+  jsonResponse
+  (header "Authorization" $ "Bot " <> botAccessToken dconf)
+
+sendSimpleReaction :: (MonadHttp m) => DiscordConfig -> DiscordChannelID -> DiscordMessageID -> T.Text -> m (JsonResponse Value)
+sendSimpleReaction dconf channel message emoji = req PUT
+  (discordApiBaseUrl /: "channels" /: channel /: "messages" /: message /: "emojis" /: emoji /: "@me")
+  (ReqBodyJson . object  $ [])
+  jsonResponse
   (header "Authorization" $ "Bot " <> botAccessToken dconf)
