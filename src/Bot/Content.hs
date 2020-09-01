@@ -8,21 +8,36 @@ import Bot.Intent
 import Discord.Comms
 import Discord.Config
 import Network.HTTP.Req
-import Data.Text as T
+import qualified Data.Text as T
 import Data.HashMap.Lazy
 import Data.Maybe
+import qualified Bot.Content.Poll as Poll
+import qualified Bot.Content.PythonRunner as Py
 
 botIntents :: IntentResolver
 botIntents = prefixed
 
 prefixed :: IntentResolver
-prefixed = intentProcessPrefix ">>" allIntents (\_ -> mempty)
-    where
-        allIntents :: IntentResolver
-        allIntents = intentKeywords $ fromList [
-            ("echo", echoIntent),
-            ("about", aboutIntent)
-            ]
+prefixed = intentProcessPrefix ">>" allIntents helpIntents
+  where
+    allIntents :: IntentResolver
+    allIntents = intentKeywords $ fromList [
+      ("echo", echoIntent),
+      ("about", aboutIntent),
+      (Poll.prefix, Poll.createPollIntent),
+      (Py.prefix, Py.runPythonIntent)
+      ]
+
+helpIntents :: IntentResolver
+helpIntents = intentProcessPrefix "?>" allIntents mempty
+  where
+    allIntents :: IntentResolver
+    allIntents = intentKeywords $ fromList [
+      ("echo", echoHelpIntent),
+      ("about", aboutHelpIntent),
+      (Poll.prefix, Poll.helpIntent),
+      (Py.prefix, Py.helpIntent)
+      ]
 
 echoIntent :: IntentResolver
 echoIntent = intent $ f
@@ -30,12 +45,30 @@ echoIntent = intent $ f
         f conf e@(MessageCreate c _ m) conn = let mMod = (fromMaybe "Cannot echo empty message." $ T.stripPrefix "echo" $ messageContent m) in
             void $ runReq defaultHttpConfig $ sendSimpleMessage conf c mMod
 
+echoHelpIntent :: IntentResolver
+echoHelpIntent = intent f
+  where
+    f conf e@(MessageCreate c _ _) _ = void $ runReq defaultHttpConfig $ sendSimpleMessage conf c $
+      "Command **echo**:\n"
+      <> "Echoes the message you send after the `echo` command.\n"
+      <> "Example Usage:\n"
+      <> "> >> echo ping\n"
+
 aboutIntent :: IntentResolver
 aboutIntent = intent $ f
     where
         f conf e@(MessageCreate c _ _) conn = void $ runReq defaultHttpConfig $ sendSimpleMessage conf c aboutText
-        aboutText = "An Untitled Naufik Project\n"
+        aboutText = "An Unnamed Bot\n"
             <> "```\n"
-            <> "version: 0.2.0\n"
-            <> "idk what features should I add but hey it's here\n"
-            <> "```"
+            <> "Version: in-development 0.2.0\n"
+            <> "Created for private use only.\n"
+            <> "see: http://github.com/naufik/naufals-obedient-bot\n"
+            <> "```\n"
+            <> "Bot name is subject to change."
+
+aboutHelpIntent :: IntentResolver
+aboutHelpIntent = intent $ f
+  where
+    f conf e@(MessageCreate c _ _ ) conn = void $ runReq defaultHttpConfig $ sendSimpleMessage conf c $
+      "Command **about**:\n"
+      <> "Prints bot information."
