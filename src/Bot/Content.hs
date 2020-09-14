@@ -13,6 +13,7 @@ import Data.HashMap.Lazy
 import Data.Maybe
 import qualified Bot.Content.Poll as Poll
 import qualified Bot.Content.PythonRunner as Py
+import qualified Bot.Content.Roll as Roll
 
 botIntents :: IntentResolver
 botIntents = prefixed
@@ -25,7 +26,8 @@ prefixed = intentProcessPrefix ">>" allIntents helpIntents
       ("echo", echoIntent),
       ("about", aboutIntent),
       (Poll.prefix, Poll.createPollIntent),
-      (Py.prefix, Py.runPythonIntent)
+      (Py.prefix, Py.runPythonIntent),
+      (Roll.prefix, Roll.rollIntent)
       ]
 
 helpIntents :: IntentResolver
@@ -36,7 +38,8 @@ helpIntents = intentProcessPrefix "?>" allIntents mempty
       ("echo", echoHelpIntent),
       ("about", aboutHelpIntent),
       (Poll.prefix, Poll.helpIntent),
-      (Py.prefix, Py.helpIntent)
+      (Py.prefix, Py.helpIntent),
+      (Roll.prefix, Roll.helpIntent)
       ]
 
 echoIntent :: IntentResolver
