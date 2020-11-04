@@ -40,8 +40,11 @@ createPollIntent :: IntentResolver
 createPollIntent = intent createPoll'
 
 createPoll' :: BotOp
-createPoll' conf ev@(MessageCreate c user m) conn =
-  fromMaybe mempty $ parsePoll (messageContent m) >>= pure . pollMsg user
+createPoll' conf (MessageCreate c user m) _ =
+  fromMaybe mempty $ parsePoll (messageContent m) >>= \poll -> 
+    pure $
+      store poll >> 
+      pollMsg user poll
   where
     parsePoll :: T.Text -> Maybe PollCreate
     parsePoll msg = do {
@@ -51,6 +54,10 @@ createPoll' conf ev@(MessageCreate c user m) conn =
         options = drop 1 args
       }
     }
+
+    -- mock function change later.
+    store :: PollCreate -> IO ()
+    store poll = print $ title poll
 
     pollMsg :: DiscordUser -> PollCreate -> IO ()
     pollMsg user poll = (runReq defaultHttpConfig $ sendSimpleMessage conf c (makeMsg user poll)) >>= putStrLn . show
