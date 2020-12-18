@@ -20,6 +20,6 @@ data DiscordConfig = DiscordConfig {
 loadDiscordConfig :: IO DiscordConfig
 loadDiscordConfig =
   mapM getEnv ["DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET", "DISCORD_BOT_ACCESS_TOKEN"] >>=
-  \[a0, a1, a2] -> return $ DiscordConfig { clientId = BU.fromString a0,
+  \[a0, a1, a2] -> pure $ DiscordConfig { clientId = BU.fromString a0,
     clientSecret = BU.fromString a1,
     botAccessToken = BU.fromString a2 }
