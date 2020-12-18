@@ -15,17 +15,10 @@ module Bot.Intent (
 
 import Discord.Config
 import Discord.Comms
-import Control.Concurrent
-import Control.Monad
 import qualified Data.Text as T
 import Network.WebSockets
-import Network.HTTP.Req
-
-import Data.Maybe (listToMaybe)
-import Data.Aeson
-import Data.Aeson.Types
+import Data.Maybe ( fromMaybe, listToMaybe )
 import Data.HashMap.Lazy
-import Data.Maybe
 
 type RootBotOp       = DiscordConfig -> GatewaySignal -> ClientApp ()
 type BotOp           = DiscordConfig -> DiscordEvent -> ClientApp ()
@@ -39,7 +32,7 @@ createListenerFromIntents getIntent conf sig = fromMaybe mempty $ do {
   }
 
 intent :: BotOp -> (DiscordEvent -> Maybe BotOp)
-intent op _ = Just $ op
+intent op _ = Just op
 
 intentSequential :: [(DiscordEvent -> Bool, IntentResolver)] -> IntentResolver
 intentSequential [] _ = Nothing
@@ -48,13 +41,13 @@ intentSequential ((test, op):intents) msg
   | otherwise = intentSequential intents msg
 
 intentKeywords :: HashMap T.Text IntentResolver -> IntentResolver
-intentKeywords intentMap e = getMessageKeyword e >>= (intentMap !?) >>= (flip ($)) e
+intentKeywords intentMap e = getMessageKeyword e >>= (intentMap !?) >>= flip ($) e
 
 getMessageKeyword :: DiscordEvent -> Maybe T.Text
 getMessageKeyword (MessageCreate _ _ z) = (pure . T.words . messageContent) z >>= listToMaybe
 getMessageKeyword _ = Nothing
 
-intentProcessPrefix :: T.Text -> IntentResolver -> (IntentResolver) -> IntentResolver
+intentProcessPrefix :: T.Text -> IntentResolver -> IntentResolver -> IntentResolver
 intentProcessPrefix prefix catch loose ev = case matchMessage ev of
   Just True -> processSignal ev >>= catch >>= pure . unprefixedCatch
   _ -> loose ev
