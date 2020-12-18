@@ -23,10 +23,11 @@ module Discord.Comms (
 ) where
 
 import Control.Concurrent.MVar
-import Control.Concurrent
-import Control.Monad
-import Control.Monad.IO.Class
-import Data.Maybe
+    ( swapMVar, newMVar, readMVar, MVar )
+import Control.Concurrent ( threadDelay, forkIO )
+import Control.Monad ( join, forever, void )
+import Data.Maybe ( fromMaybe )
+import Data.Functor (void, (<&>))
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as B8
 import qualified Data.Text as T
@@ -80,25 +81,23 @@ data DiscordUser = DiscordUser {
 } deriving Show
 
 instance FromJSON DiscordUser where
-  parseJSON = (withObject "DiscordUser" $ \v -> do {
-      nickname  <- (v .: "nick")
+  parseJSON = withObject "DiscordUser" (\v -> do {
+      nickname  <- v .: "nick"
     ; _user     <- (v .: "user") >>= parseFullUser
     ; pure $ _user { userNickname = nickname }
-    }) <> (withObject "DiscordUser" parseFullUser)
+    }) <> withObject "DiscordUser" parseFullUser
     where
       parseFullUser :: Object -> Parser DiscordUser
       parseFullUser v = do {
-          id <- (v .: "id")
-        ; un <- (v .: "username")
-        ; bot <- (v .:? "bot")
-        ; disc <- (v .: "discriminator")
+          id <- v .: "id"
+        ; un <- v .: "username"
+        ; bot <- v .:? "bot"
+        ; disc <- v .: "discriminator"
         ; pure $ DiscordUser {
           userId = id,
           username = un,
           userNickname = Nothing,
-          isBot = case bot of
-            Just x  -> x
-            Nothing -> False,
+          isBot = Just True == bot,
           userDiscriminator = disc
         }}
 
@@ -119,11 +118,9 @@ data DiscordEmoji = DiscordEmoji {
 
 instance FromJSON DiscordEmoji where
   parseJSON = withObject "DiscordEmoji" $ \v ->
-    DiscordEmoji <$> (v .: "id" >>= pure . unNull) 
-      <*> (v .: "name" >>= pure . unNull)
-      <*> (v .:? "animated" >>= \x -> pure $ case x of
-        Nothing -> False
-        Just x -> x)
+    DiscordEmoji <$> (v .: "id" <&> unNull) 
+      <*> (v .: "name" <&> unNull)
+      <*> (v .:? "animated" >>= \x -> pure $ x == Just True)
     where
       unNull :: Value -> Maybe T.Text
       unNull (String x) = Just x
@@ -138,11 +135,11 @@ channel_ :: Object -> Parser DiscordChannelID
 channel_ v = (v .: "d") >>= (.: "channel_id")
 
 signalToEvent :: GatewaySignal -> Maybe DiscordEvent
-signalToEvent (GatewaySignal 0 _ pl) = getEventType pl >>= (flip payloadToEvent) pl
+signalToEvent (GatewaySignal 0 _ pl) = getEventType pl >>= flip payloadToEvent pl
 signalToEvent (GatewaySignal _ _ _) = Nothing
 
 getEventType :: Value -> Maybe T.Text
-getEventType pl = join $ parseMaybe (withObject "Payload" $ \v -> (v .:? "t")) pl
+getEventType pl = join $ parseMaybe (withObject "Payload" $ \v -> v .:? "t") pl
 
 payloadToEvent :: T.Text -> Value -> Maybe DiscordEvent
 payloadToEvent "MESSAGE_CREATE" = parseMaybe (withObject "Payload" $ \v ->
@@ -151,11 +148,11 @@ payloadToEvent "MESSAGE_REACTION_ADD" = parseMaybe (withObject "Payload" $ \v ->
   MessageReactionAdd <$> channel_ v <*> ((v .: "d") >>= (.: "member")) <*> ((v .: "d") >>= (.: "message_id")) <*> ((v .: "d") >>= (.: "emoji")))
 payloadToEvent "MESSAGE_REACTION_REMOVE" = parseMaybe (withObject "Payload" $ \v ->
   MessageReactionRemove <$> channel_ v <*> ((v .: "d") >>= (.: "user_id")) <*> ((v .: "d") >>= (.: "message_id")) <*> ((v .: "d") >>= (.: "emoji")))
-payloadToEvent _ = \t -> Nothing
+payloadToEvent _ = const Nothing
 
 fullUser :: HashMap T.Text Value -> Value
-fullUser v = case (v ! "member") of
-  Object m -> Object $ m <> fromList [("user", (v ! "author"))]
+fullUser v = case v ! "member" of
+  Object m -> Object $ m <> fromList [("user", v ! "author")]
   _ -> object []
 
 -- Functions that deal with gateway.
@@ -164,7 +161,7 @@ createGatewayListener :: DiscordConfig -> (DiscordConfig -> GatewaySignal -> Cli
 createGatewayListener config processEvent conn =
   gatewayHello
   >>= (\(GatewaySignal i _ v, seqVar) ->
-    (createHeartbeater 20000000 seqVar conn)
+    createHeartbeater 20000000 seqVar conn
     >> sendGatewayIdentify config conn 
     -- start operation as usual.
     >> forever (receiveRoutine seqVar))
@@ -172,17 +169,16 @@ createGatewayListener config processEvent conn =
     gatewayHello :: IO (GatewaySignal, MVar Integer)
     gatewayHello = getGatewayData conn
       >>= (return . fromMaybe (GatewaySignal 0 Nothing $ object []) . decodeStrict)
-      >>= (\x -> newMVar 0 >>= pure . ((,) x))
+      >>= (\x -> newMVar 0 <&> (,) x)
 
     receiveRoutine :: MVar Integer -> IO ()
     receiveRoutine seqVar = void $ getGatewayData conn
-      >>= pure . (\x -> (decodeStrict x :: Maybe GatewaySignal))
-      >>= processMessage seqVar
+      >>= processMessage seqVar . (\x -> (decodeStrict x :: Maybe GatewaySignal))
 
     processMessage :: MVar Integer -> Maybe GatewaySignal -> IO ()
     processMessage seqVar (Just (GatewaySignal op seq pl)) =
       processEvent config (GatewaySignal op seq pl) conn
-      >> case seq of  Just i -> (swapMVar seqVar i >> pure ())
+      >> case seq of  Just i -> void $ swapMVar seqVar i
                       Nothing  -> pure ()
 
 createHeartbeater :: Int -> MVar Integer -> Connection -> IO ()
@@ -197,7 +193,7 @@ sendGatewayIdentify :: DiscordConfig -> Connection -> IO ()
 sendGatewayIdentify config conn = sendTextData conn $ encode $
   object [ "op" .= (2 :: Integer), 
   "d" .= object [
-    "token" .= (decodeUtf8 $ botAccessToken config),
+    "token" .= decodeUtf8 (botAccessToken config),
     "properties" .= libData
   ]]
 
