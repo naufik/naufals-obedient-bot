@@ -2,8 +2,9 @@
 
 module Bot.Content.Poll (
   prefix,
-  createPollIntent,
-  helpIntent
+  pollIntents,
+  helpIntent,
+  createPollIntent
 ) where
   
 import Discord.Comms
@@ -12,6 +13,7 @@ import qualified Data.Text as T
 import Network.HTTP.Req
 import Control.Monad
 import Data.Maybe
+import Data.Functor ((<&>))
 
 data PollCreate = Poll { title :: T.Text, options :: [T.Text] }
 
@@ -24,14 +26,13 @@ pollIntents = intentSequential [
     (testVote, createPollIntent)
   ]
   where
-    testCreate ev@(MessageCreate _ user msg) =
-      and [
-        not $ isBot user,
-        T.isPrefixOf (prefix) (messageContent msg)
-      ]
+    testCreate (MessageCreate _ user msg) =
+        not $ isBot user &&
+        T.isPrefixOf prefix (messageContent msg)
+  
     testCreate _ = False
 
-    testVote ev@(MessageReactionAdd _ user m e) = 
+    testVote (MessageReactionAdd _ user _ _) = 
       and [
         not $ isBot user
       ]
@@ -48,7 +49,7 @@ createPoll' conf (MessageCreate c user m) _ =
   where
     parsePoll :: T.Text -> Maybe PollCreate
     parsePoll msg = do {
-      args <- T.stripPrefix "poll" msg >>= pure . map T.strip . T.splitOn "\n"
+      args <- T.stripPrefix "poll" msg <&> map T.strip . T.splitOn "\n"
     ; pure $ Poll {
         title = head args,
         options = drop 1 args
@@ -71,7 +72,7 @@ helpIntent :: IntentResolver
 helpIntent = intent help'
 
 help' :: BotOp
-help' conf ev@(MessageCreate c user m) _ = void $ runReq defaultHttpConfig $ sendSimpleMessage conf c $
+help' conf (MessageCreate c _ _) _ = void $ runReq defaultHttpConfig $ sendSimpleMessage conf c $
   "Command **poll**:\n"
   <> "Creates a poll that can be interacted by using reactions. The message will be updated when votes are added or removed "
   <> "to show the current winning options.\n\n"

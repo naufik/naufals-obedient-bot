@@ -58,8 +58,8 @@ runPython' conf e@(MessageCreate c _ _) script = do {
 
     consumeRecursive :: Handle -> String -> IO ()
     consumeRecursive hOut s = do {
-      toStop <- (hIsOpen hOut >>= pure . not)
-    ; if toStop then sendContent s else (hGetContents hOut >>= consumeRecursive hOut . (s++))
+      toStop <- not <$> hIsOpen hOut
+    ; if toStop then sendContent s else hGetContents hOut >>= consumeRecursive hOut . (s++)
     }
 
 helpIntent :: IntentResolver
