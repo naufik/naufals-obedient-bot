@@ -54,7 +54,6 @@ aboutIntent = intent $ f
             <> "```\n"
             <> "Version: in-development 0.2.0\n"
             <> "Created for private use only.\n"
-            <> "see: http://github.com/naufik/naufals-obedient-bot\n"
             <> "```\n"
             <> "Bot name is subject to change."
 
