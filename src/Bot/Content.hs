@@ -15,13 +15,10 @@ import qualified Bot.Content.Poll as Poll
 import qualified Bot.Content.Roll as Roll
 
 botIntents :: IntentResolver
-botIntents = prefixed
+botIntents = intentProcessPrefix "%?" helpIntents (intentProcessPrefix "%" allIntents)
 
-prefixed :: IntentResolver
-prefixed = intentProcessPrefix "%%" allIntents helpIntents
-  where
-    allIntents :: IntentResolver
-    allIntents = intentKeywords $ fromList [
+allIntents :: IntentResolver
+allIntents = intentKeywords $ fromList [
       ("echo", echoIntent),
       ("about", aboutIntent),
       (Poll.prefix, Poll.createPollIntent),
@@ -29,10 +26,7 @@ prefixed = intentProcessPrefix "%%" allIntents helpIntents
       ]
 
 helpIntents :: IntentResolver
-helpIntents = intentProcessPrefix "%?" allIntents mempty
-  where
-    allIntents :: IntentResolver
-    allIntents = intentKeywords $ fromList [
+helpIntents = intentKeywords $ fromList [
       ("echo", echoHelpIntent),
       ("about", aboutHelpIntent),
       (Poll.prefix, Poll.helpIntent),
