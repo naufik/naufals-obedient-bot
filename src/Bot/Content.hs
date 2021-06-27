@@ -12,33 +12,30 @@ import qualified Data.Text as T
 import Data.HashMap.Lazy
 import Data.Maybe
 import qualified Bot.Content.Poll as Poll
-import qualified Bot.Content.PythonRunner as Py
 import qualified Bot.Content.Roll as Roll
 
 botIntents :: IntentResolver
 botIntents = prefixed
 
 prefixed :: IntentResolver
-prefixed = intentProcessPrefix ">>" allIntents helpIntents
+prefixed = intentProcessPrefix "%%" allIntents helpIntents
   where
     allIntents :: IntentResolver
     allIntents = intentKeywords $ fromList [
       ("echo", echoIntent),
       ("about", aboutIntent),
       (Poll.prefix, Poll.createPollIntent),
-      (Py.prefix, Py.runPythonIntent),
       (Roll.prefix, Roll.rollIntent)
       ]
 
 helpIntents :: IntentResolver
-helpIntents = intentProcessPrefix "?>" allIntents mempty
+helpIntents = intentProcessPrefix "%?" allIntents mempty
   where
     allIntents :: IntentResolver
     allIntents = intentKeywords $ fromList [
       ("echo", echoHelpIntent),
       ("about", aboutHelpIntent),
       (Poll.prefix, Poll.helpIntent),
-      (Py.prefix, Py.helpIntent),
       (Roll.prefix, Roll.helpIntent)
       ]
 
