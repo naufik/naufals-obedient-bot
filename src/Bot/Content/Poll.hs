@@ -32,10 +32,7 @@ pollIntents = intentSequential [
   
     testCreate _ = False
 
-    testVote (MessageReactionAdd _ user _ _) = 
-      and [
-        not $ isBot user
-      ]
+    testVote (MessageReactionAdd _ user _ _) = not (isBot user)
 
 createPollIntent :: IntentResolver
 createPollIntent = intent createPoll'

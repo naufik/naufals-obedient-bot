@@ -21,7 +21,6 @@ allIntents :: IntentResolver
 allIntents = intentKeywords $ fromList [
       ("echo", echoIntent),
       ("about", aboutIntent),
-      (Poll.prefix, Poll.createPollIntent),
       (Roll.prefix, Roll.rollIntent)
       ]
 
@@ -29,7 +28,6 @@ helpIntents :: IntentResolver
 helpIntents = intentKeywords $ fromList [
       ("echo", echoHelpIntent),
       ("about", aboutHelpIntent),
-      (Poll.prefix, Poll.helpIntent),
       (Roll.prefix, Roll.helpIntent)
       ]
 
